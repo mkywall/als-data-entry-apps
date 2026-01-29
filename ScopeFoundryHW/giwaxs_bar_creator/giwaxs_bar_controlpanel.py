@@ -18,7 +18,7 @@ cruc_client = CrucibleClient(
 from beamline_data_toolkit.sample_tracker import SampleTrackerClient
 
 # TODO: REMOVE LATER
-test_qr_code = "HTTPS://DATAPORTAL-STAGING.ALS.LBL.GOV/SAMPLE-TRACKING/SET/B84387D1-5EE9-4FC9-AD2D-49D64A2422EF"
+#test_qr_code = "HTTPS://DATAPORTAL-STAGING.ALS.LBL.GOV/SAMPLE-TRACKING/SET/B84387D1-5EE9-4FC9-AD2D-49D64A2422EF"
 
 # Create a client object.
 als_sc_client = SampleTrackerClient(
@@ -207,6 +207,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         tf_found = cruc_client.list_samples(sample_name = tf_name, project_id = self.mf_crucible.settings['project_id'])
         if len(tf_found) == 1:
             tf_found = tf_found[0]
+
         else:
             print(f'{tf_found}')
             return
