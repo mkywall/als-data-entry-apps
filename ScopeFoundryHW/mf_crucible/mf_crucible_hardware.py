@@ -100,6 +100,8 @@ class MFCrucibleHW(HardwareComponent):
         provided_email = self.settings.email.value.strip()
         user_info = client.get_user(email = provided_email)
 
+        if user_info is None:
+            return
         # update user info
         user_name = f'{user_info['first_name']}_{user_info['last_name']}'
         self.update_lq(user_name, 'user_name')

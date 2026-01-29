@@ -43,7 +43,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
     name = "giwaxs_bar_creator"
     
     default_trayname = 'No Tray or Carrier Scanned'
-    default_trayuuid = "Scan/Enter Tray or Carrier UUID"
+    default_trayuuid = ''#"Scan/Enter Tray or Carrier UUID"
 
     default_barname = ''
     default_baruuid = ''
@@ -62,7 +62,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         S.New("tray_uuid", initial = self.default_trayuuid, dtype = str)
         
         # Enter Sample Info 
-        bar_pos_options = list(range(1,13))
+        bar_pos_options = list(range(1,15))
         S.New('select_bar_pos', initial = 1, choices = (bar_pos_options), dtype = int)
         S.New('enter_distance_mm', initial = 0.0, dtype = float)
         S.New('select_thinfilm', initial = '', choices = ([]), dtype = str)
@@ -91,7 +91,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         ui = self.ui = load_qt_ui_file(self.ui_filename)
 
         # connect to layout defined in ui file
-        S.bar_name.connect_to_widget(ui.lineEdit_bar_name)
+        S.bar_name.connect_to_widget(ui.lineEdit_barName)
         S.bar_mf_uuid.connect_to_widget(ui.lineEdit_mf_bar_uuid)
         S.bar_als_uuid.connect_to_widget(ui.lineEdit_als_bar_uuid)
 
@@ -103,8 +103,8 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         S.select_thinfilm.connect_to_widget(ui.comboBox_select_thinfilm)
         
         for i in range(1,15):
-            S[f'pos{i}_distance_mm'].connect_to_widget(ui[f'doubleSpinBox_mm_{i}'])
-            S[f'pos{i}_thin_film'].connect_to_widget(ui[f'lineEdit_tf_{i}'])
+            S.get_lq(f'pos{i}_distance_mm').connect_to_widget(getattr(self.ui, f'doubleSpinBox_mm_{i}'))
+            S.get_lq(f'pos{i}_thin_film').connect_to_widget(getattr(self.ui, f'lineEdit_tf_{i}'))
 
         ui.pushButton_create_bar.clicked.connect(self.generate_bar_info)
         ui.pushButton_add_to_bar.clicked.connect(self.add_sample_to_bar_layout)
@@ -137,7 +137,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
             new_crux_bar = cruc_client.add_sample(sample_name = bar_name,
                                         creation_date = get_tz_isoformat(),
                                         owner_orcid = self.mf_crucible.settings['orcid'],
-                                        project_id = self.mf_crucible.settings['project_id'],
+                                        project_id = self.mf_crucible.settings['project'],
                                         sample_type = 'giwaxs bar'
                                         )
             mfid = new_crux_bar['unique_id']
@@ -165,6 +165,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
                 f"Crucible UUID: {mfid}\n"
                 f"ALS Set ID: {new_als_set['id']}"
             )
+            return
             
         except Exception as e:
             # Failure dialog
@@ -173,10 +174,11 @@ class GiwaxsBarCreatorControlPanel(Measurement):
                 "Bar Creation Failed",
                 f"Failed to create bar.\n\nError: {str(e)}"
             )
+            return
 
 
     def read_bar_number_from_crucible(self):
-        bar_number = get_next_serial_sample('GWBAR', self.mf_crucible.settings['project_id'])
+        bar_number = get_next_serial_sample('GWBAR', self.mf_crucible.settings['project'])
         bar_name = f'GWBAR{bar_number:06d}'
         self.update_lq(bar_name, 'bar_name')
         return bar_name
@@ -204,7 +206,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
     def add_sample_to_bar_layout(self):
         i = self.settings['select_bar_pos']
         tf_name = self.settings['select_thinfilm']
-        tf_found = cruc_client.list_samples(sample_name = tf_name, project_id = self.mf_crucible.settings['project_id'])
+        tf_found = cruc_client.list_samples(sample_name = tf_name, project_id = self.mf_crucible.settings['project'])
         if len(tf_found) == 1:
             tf_found = tf_found[0]
 
