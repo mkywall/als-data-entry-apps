@@ -2,6 +2,7 @@ from ScopeFoundry.measurement import Measurement
 from ScopeFoundry.helper_funcs import sibling_path, load_qt_ui_file
 from mfid import mfid
 import os
+from qtpy import QtWidgets
 
 # ============ CRUCIBLE
 from dotenv import load_dotenv
@@ -56,7 +57,6 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         S.New('bar_mf_uuid', initial = self.default_baruuid, dtype = str)
         S.New(f'bar_als_uuid', initial = self.default_baruuid, dtype = str)
 
-
         # Tray Info
         S.New('tray_name', initial = self.default_trayname, dtype = str)
         S.New("tray_uuid", initial = self.default_trayuuid, dtype = str)
@@ -77,6 +77,10 @@ class GiwaxsBarCreatorControlPanel(Measurement):
 
         # actions
         S.tray_uuid.add_listener(self.on_enter_tray_uuid, argtype = str)
+        
+        # Initialize all_sample_info
+        self.all_sample_info = []
+        
         self.setup_ui()
     
 
@@ -117,46 +121,70 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         prop_lq.change_choice_list(new_choices)
         prop_lq.update_value(new_value)
 
-    # === TODO: Add Dialog if this fails // AND IF SUCCEEDS
-    # === TODO: clear bar layout when you create a new bar // also clear the all_sample_info
-    # === NOTE: does it make sense to have a setting the whole time that is a list of the samples in the layout..
+    def clear_bar_layout(self):
+        """Clear all bar layout positions"""
+        for i in range(1, 15):
+            self.update_lq('', f'pos{i}_thin_film')
+            self.update_lq('', f'pos{i}_thin_film_mfid')
+            self.update_lq('', f'pos{i}_thin_film_descrip')
+        self.all_sample_info = []
+
     def generate_bar_info(self):
-        bar_name = self.read_bar_number_from_crucible()
+        try:
+            bar_name = self.read_bar_number_from_crucible()
 
-        # CREATE IN CRUCIBLE
-        new_crux_bar = cruc_client.add_sample(sample_name = bar_name,
-                                    creation_date = get_tz_isoformat(),
-                                    owner_orcid = self.mf_crucible.settings['orcid'],
-                                    project_id = self.mf_crucible.settings['project_id'],
-                                    sample_type = 'giwaxs bar'
-                                    )
-        mfid = new_crux_bar['unique_id']
+            # CREATE IN CRUCIBLE
+            new_crux_bar = cruc_client.add_sample(sample_name = bar_name,
+                                        creation_date = get_tz_isoformat(),
+                                        owner_orcid = self.mf_crucible.settings['orcid'],
+                                        project_id = self.mf_crucible.settings['project_id'],
+                                        sample_type = 'giwaxs bar'
+                                        )
+            mfid = new_crux_bar['unique_id']
 
-        # CREATE IN ALS SCICAT
-        new_als_set = als_sc_client.create_set(name = bar_name, 
-                                               groupId = '733',
-                                               proposalId = 'DD-00839',
-                                               description = f'MF Thin Film Perovskites GWBAR (mfid: {mfid})')
+            # CREATE IN ALS SCICAT
+            new_als_set = als_sc_client.create_set(name = bar_name, 
+                                                   groupId = '733',
+                                                   proposalId = 'DD-00839',
+                                                   description = f'MF Thin Film Perovskites GWBAR (mfid: {mfid})')
 
-        # ADD ALS INFO TO CRUCIBLE
-        cruc_client.update_sample(sample_description =f'ALS GIWAXS Bar || Set ID: {new_als_set['id']}' )
+            # ADD ALS INFO TO CRUCIBLE
+            cruc_client.update_sample(sample_description =f'ALS GIWAXS Bar || Set ID: {new_als_set['id']}' )
 
-        self.update_lq(new_crux_bar['unique_id'], 'bar_mf_uuid')
-        self.update_lq(new_als_set['id'], 'bar_als_uuid')
-
+            self.update_lq(new_crux_bar['unique_id'], 'bar_mf_uuid')
+            self.update_lq(new_als_set['id'], 'bar_als_uuid')
+            
+            # Clear bar layout when creating new bar
+            self.clear_bar_layout()
+            
+            # Success dialog
+            QtWidgets.QMessageBox.information(
+                self.ui,
+                "Bar Created Successfully",
+                f"Bar '{bar_name}' created successfully!\n\n"
+                f"Crucible UUID: {mfid}\n"
+                f"ALS Set ID: {new_als_set['id']}"
+            )
+            
+        except Exception as e:
+            # Failure dialog
+            QtWidgets.QMessageBox.critical(
+                self.ui,
+                "Bar Creation Failed",
+                f"Failed to create bar.\n\nError: {str(e)}"
+            )
 
 
     def read_bar_number_from_crucible(self):
-        bar_number = self.get_next_serial_sample(self.mf_crucible.settings['project_id'],'GWBAR')
+        bar_number = get_next_serial_sample('GWBAR', self.mf_crucible.settings['project_id'])
         bar_name = f'GWBAR{bar_number:06d}'
         self.update_lq(bar_name, 'bar_name')
         return bar_name
 
 
-    def on_enter_tray_id(self):
-        tray_uuid = self.settings[f'tray_uuid']
+    def on_enter_tray_uuid(self, tray_uuid):
         if len(tray_uuid) != 26:
-            self.update_lq(self.default_trayname, tray_name)
+            self.update_lq(self.default_trayname, 'tray_name')
             self.update_lq_list([], '', 'select_thinfilm')
             return tray_uuid
         
@@ -188,7 +216,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         self.update_lq(tf_name, f'pos{i}_thin_film')
         self.update_lq(tf_mfid, f'pos{i}_thin_film_mfid')
         self.update_lq(tf_descrip, f'pos{i}_thin_film_descrip')
-        self.update_lq(self.settings['enter_distance'], f'pos{i}_distance_mm')
+        self.update_lq(self.settings['enter_distance_mm'], f'pos{i}_distance_mm')
         return
 
 
@@ -198,20 +226,29 @@ class GiwaxsBarCreatorControlPanel(Measurement):
     
     def collect_single_sample_info(self, i):
         tf_name = self.settings[f'pos{i}_thin_film']
+        
+        # Skip empty positions
+        if not tf_name:
+            return None
+            
         tf_mfid = self.settings[f'pos{i}_thin_film_mfid']
         tf_descrip = self.settings[f'pos{i}_thin_film_descrip']
 
         # get metadata
         sample_ds = cruc_client.list_datasets(sample_id = tf_mfid, measurement = 'spin_run', include_metadata = True)
         sample_synds = [ds for ds in sample_ds if ds['measurement'] == 'spin_run'] # filtering currently broken
-        sample_syn_md = sample_synds['scientific_metadata']['scientific_metadata']
+        
+        if not sample_synds:
+            return None
+            
+        sample_syn_md = sample_synds[0]['scientific_metadata']['scientific_metadata']
 
         # NOTE: Is it appropriate to have our metadata in parameters? - do we need to recalculate center?
         sample_syn_md['mfid'] = tf_mfid
-        sample_syn_md["sample_center_position"]= self.settings[f'pos{i}_thin_film_dist']
+        sample_syn_md["sample_center_position"]= self.settings[f'pos{i}_distance_mm']
         sample_syn_md["incident_angles"] =  "0.14" # ??
 
-        sample_info_preview = {'bar position': i,
+        sample_info_preview = {'bar_position': i,
                                'tf_name': tf_name,
                                'tf_mfid': tf_mfid,
                                'sample_parameters': sample_syn_md
@@ -221,54 +258,97 @@ class GiwaxsBarCreatorControlPanel(Measurement):
 
     def collect_all_sample_info(self):
         import time
-        stime = time.now()
+        stime = time.time()
         self.all_sample_info = []
         for i in range(1,15):
             # TODO: parallelize
             sample_info_preview = self.collect_single_sample_info(i)
-            self.all_sample_info.append(sample_info_preview)
-            # TODO: sort results by position
-        etime = time.now()
-        print(f'took {etime - stime}s')
-        return
-    
-    # === TODO: ADD A BUTTON FOR THIS AND A WIDGET TO VIEW / OR DIALOG POPUP 
-    # ==== NOTE: OR MAYBE INSTEAD OF PREVIEW. THERE IS A DIALOG IN THE UPLOAD FUNC
-    def preview_samples_for_upload(self):
-        if not self.all_sample_info:
-            self.collect_all_sample_info()
-        # TODO: display this info somewhere
-        return
-
-    # TODO: Add dialog on success or fail
-    def upload_to_database(self):
-        if not self.all_sample_info:
-            self.collect_all_sample_info()
+            if sample_info_preview:  # Only add non-empty samples
+                self.all_sample_info.append(sample_info_preview)
         
-        for tf in self.all_sample_info():
-            tf_name = tf['tf_name']
-            tf_mfid = tf['tf_mfid']
+        # Sort results by position
+        self.all_sample_info.sort(key=lambda x: x['bar_position'])
+        
+        etime = time.time()
+        print(f'took {etime - stime}')
+        
 
-            # link to bar in crucible
-            cruc_client.link_samples(parent_sample_id = self.settings['bar_mf_uuid'],
-                                     child_sample_id = tf_mfid)
-
-            # create sample in ALS scicat
-            # sample_ds = cruc_client.list_datasets(sample_id = tf_mfid, measurement = 'spin_run', include_metadata = True)
-            # sample_synds = [ds for ds in sample_ds if ds['measurement'] == 'spin_run'] # filtering currently broken
-            # sample_syn_md = sample_synds['scientific_metadata']['scientific_metadata']
-            # sample_syn_md['mfid'] = tf_mfid
-
-            new_als_samp = als_sc_client.create_sample(name = tf_name,
-                                        group_id = '733',
-                                        proposal_id = 'DD-00839',
-                                        scan_type = 'GIWAXS',
-                                        set_id = self.settings['bar_als_uuid'],
-                                        description = f'TMF Perovskite Thin Film (mfid: {tf_mfid})',
-                                        parameters = tf['sample_parameters'])
+    def show_sample_preview_dialog(self):
+        """Show preview dialog with sample information"""
+        if not self.all_sample_info:
+            QtWidgets.QMessageBox.warning(
+                self.ui,
+                "No Samples",
+                "No samples found in bar layout."
+            )
+            return False
             
-            # update sample in crucible
-            updated_description = f'{tf['tf_descrip']} {new_als_samp['id']}'.strip()
-            cruc_client.update_sample(tf_mfid, sample_description = updated_description)
-            return
-    # === TODO: CREATE AN OUTPUT FILE WITH ALL THE SETTINGS
+        # Create preview text
+        preview_text = f"Bar Name: {self.settings['bar_name']}\n"
+        preview_text += f"Crucible UUID: {self.settings['bar_mf_uuid']}\n"
+        preview_text += f"ALS Set ID: {self.settings['bar_als_uuid']}\n\n"
+        preview_text += f"Samples ({len(self.all_sample_info)}):\n"
+        preview_text += "-" * 60 + "\n"
+        
+        for sample in self.all_sample_info:
+            preview_text += f"\nPosition {sample['bar_position']}: {sample['tf_name']}\n"
+            preview_text += f"  MFID: {sample['tf_mfid']}\n"
+            preview_text += f"  Center Position: {sample['sample_parameters']['sample_center_position']} mm\n"
+        
+        # Create dialog
+        dialog = QtWidgets.QMessageBox(self.ui)
+        dialog.setWindowTitle("Sample Preview")
+        dialog.setText("Review samples before uploading to database:")
+        dialog.setDetailedText(preview_text)
+        dialog.setStandardButtons(QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel)
+        dialog.setDefaultButton(QtWidgets.QMessageBox.Ok)
+        
+        # Show dialog and return result
+        result = dialog.exec_()
+        return result == QtWidgets.QMessageBox.Ok
+
+    
+    def add_bar_samples_to_database(self):
+        try:
+            # Collect all sample information
+            self.collect_all_sample_info()
+            
+            # Show preview dialog - only continue if user clicks OK
+            if not self.show_sample_preview_dialog():
+                return
+            
+            # Upload samples
+            for tf in self.all_sample_info:
+                tf_name = tf['tf_name']
+                tf_mfid = tf['tf_mfid']
+
+                # link to bar in crucible
+                cruc_client.link_samples(parent_sample_id = self.settings['bar_mf_uuid'],
+                                         child_sample_id = tf_mfid)
+
+                new_als_samp = als_sc_client.create_sample(name = tf_name,
+                                            group_id = '733',
+                                            proposal_id = 'DD-00839',
+                                            scan_type = 'GIWAXS',
+                                            set_id = self.settings['bar_als_uuid'],
+                                            description = f'TMF Perovskite Thin Film (mfid: {tf_mfid})',
+                                            parameters = tf['sample_parameters'])
+                
+                # update sample in crucible
+                updated_description = f"{tf.get('tf_descrip', '')} {new_als_samp['id']}".strip()
+                cruc_client.update_sample(tf_mfid, sample_description = updated_description)
+            
+            # Success dialog
+            QtWidgets.QMessageBox.information(
+                self.ui,
+                "Upload Successful",
+                f"Successfully uploaded {len(self.all_sample_info)} samples to database."
+            )
+            
+        except Exception as e:
+            # Failure dialog
+            QtWidgets.QMessageBox.critical(
+                self.ui,
+                "Upload Failed",
+                f"Failed to upload samples to database.\n\nError: {str(e)}"
+            )
