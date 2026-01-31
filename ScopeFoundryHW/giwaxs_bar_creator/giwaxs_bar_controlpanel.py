@@ -99,6 +99,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
 
         # actions
         S.email.add_listener(self.on_enter_email, argtype = str)
+        S.bar_name.add_listener(self.on_enter_bar_name, argtype = str)
         S.tray_uuid.add_listener(self.on_enter_tray_uuid, argtype = str)
         S.incidence_angle_all.add_listener(self.apply_incidence_angle, argtype = float)
         S.offset_from_left_mm.add_listener(self.recalc_positions, argtype = float)
@@ -176,6 +177,19 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         project_ids = [x['project_id'] for x in projects]
         project_ids.sort()
         self.update_lq_list(project_ids, project_ids[0], 'project')
+
+    def on_enter_bar_name(self):
+        mf_bars = cruc_client.list_samples(sample_name=self.settings['bar_name'])
+        if len(mf_bars) == 1:
+            mfid = mf_bars[0]['unique_id']
+            alsid = mf_bars[0]['description'].split('|| Set ID:')[-1].strip()
+        else:
+            print(f'{mf_bars=}')
+            return
+
+
+        self.update_lq(mfid, 'bar_mf_uuid')
+        self.update_lq(alsid, 'bar_als_uuid')
 
 
     def clear_userinfo(self):
