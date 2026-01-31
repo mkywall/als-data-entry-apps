@@ -179,14 +179,15 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         self.update_lq_list(project_ids, project_ids[0], 'project')
 
     def on_enter_bar_name(self):
+        mfid = ''
+        alsid = ''
         mf_bars = cruc_client.list_samples(sample_name=self.settings['bar_name'])
+        print(mf_bars)
         if len(mf_bars) == 1:
             mfid = mf_bars[0]['unique_id']
-            alsid = mf_bars[0]['description'].split('|| Set ID:')[-1].strip()
-        else:
-            print(f'{mf_bars=}')
-            return
-
+            descrip =  mf_bars[0]['description']
+            if descrip is not None:
+                alsid = mf_bars[0]['description'].split('|| Set ID:')[-1].strip()      
 
         self.update_lq(mfid, 'bar_mf_uuid')
         self.update_lq(alsid, 'bar_als_uuid')
@@ -338,7 +339,21 @@ class GiwaxsBarCreatorControlPanel(Measurement):
 
 
     def print_barcode(self):
-        pass
+        SAMPLE_TRACKER_URL = 'HTTPS://DATAPORTAL-STAGING.ALS.LBL.GOV/SAMPLE-TRACKING'
+        from image_print import make_qr, make_nirvana_image, print_label
+        bar_num = int(self.settings['bar_name'].split('GWBAR')[-1])
+        short_bar_name = f'GWBAR{bar_num}'
+
+        for uuid_key in ['bar_mf_uuid','bar_als_uuid']:
+            uuid_val = self.settings[uuid_key]
+            if uuid_key == 'bar_als_uuid':
+                qrval = f'{SAMPLE_TRACKER_URL}/set/{uuid_val}'.upper()
+            else:
+                qrval = uuid_val
+
+            qr_img = make_qr(qrval)
+            make_nirvana_image(qr_img, [short_bar_name, uuid_val], f"batch_{uuid_key}.png")
+            print_label("Brother PT-D610BT", f"batch_{uuid_key}.png")
 
     
     def collect_single_sample_info(self, i):
