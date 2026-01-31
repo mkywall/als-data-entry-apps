@@ -5,8 +5,8 @@ from ScopeFoundry import BaseMicroscopeApp
 from ScopeFoundryHW.giwaxs_bar_creator.giwaxs_bar_controlpanel import GiwaxsBarCreatorControlPanel
 
 # cruxxxxx
-from ScopeFoundryHW.mf_crucible.mf_crucible_hardware import MFCrucibleHW
-from ScopeFoundryHW.mf_crucible.mf_crucible_controlpanel import MFCrucibleControlPanel
+#from ScopeFoundryHW.mf_crucible.mf_crucible_hardware import MFCrucibleHW
+#from ScopeFoundryHW.mf_crucible.mf_crucible_controlpanel import MFCrucibleControlPanel
 
 class GiwaxsApp(BaseMicroscopeApp):
     """
@@ -20,11 +20,11 @@ class GiwaxsApp(BaseMicroscopeApp):
 
         # ========== Hardware Components ==========
         #giwaxs_bar_creator = self.add_hardware(GiwaxsBarHW)
-        crucible = self.add_hardware(MFCrucibleHW)
+        #crucible = self.add_hardware(MFCrucibleHW)
 
         # ========== Measurements ==========
         self.add_measurement(GiwaxsBarCreatorControlPanel(self))
-        self.add_measurement(MFCrucibleControlPanel(self))
+        #self.add_measurement(MFCrucibleControlPanel(self))
 
 if __name__ == '__main__':
     import sys

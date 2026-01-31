@@ -33,6 +33,7 @@ def get_next_serial_sample(sample_prefix, project):
     filtered_samples = [x['sample_name'] for x in project_samples if x['sample_name'].startswith(sample_prefix)]
     sample_nums = [int(x.replace(sample_prefix, '')) for x in filtered_samples]
     sample_nums.sort()
+    print(sample_nums)
     if len(sample_nums) == 0:
         return 1
     return sample_nums[-1] + 1
@@ -48,9 +49,28 @@ class GiwaxsBarCreatorControlPanel(Measurement):
     default_barname = ''
     default_baruuid = ''
 
+    default_session_name = 'session name'
+    default_email = 'user-email@lbl.gov'
+    default_user_name = ''
+    default_comments= 'comments'
+    default_tags="tags,separated,by,commas"
+    default_orcid = ''
+
     def setup(self):
-        self.mf_crucible = self.app.hardware['mf_crucible_nirvana']
+
+
+       # self.mf_crucible = self.app.hardware['mf_crucible_nirvana']
         S = self.settings
+
+        # Crucible
+        S.New("email", initial = self.default_email, dtype = str)
+        S.New("user_name", initial = self.default_user_name, dtype = str)
+        S.New("orcid", initial = self.default_orcid, dtype = str)
+        S.New("project", initial = "", choices = ([]), dtype = str)
+        S.New("session_name", initial = self.default_session_name, dtype = str)
+
+        S.New("comments", initial = self.default_comments, dtype = str)
+        S.New("tags", initial = self.default_tags, dtype = str)
 
         # Bar Info
         S.New('bar_name', initial = self.default_barname, dtype = str)
@@ -64,23 +84,28 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         # Enter Sample Info 
         bar_pos_options = list(range(1,15))
         S.New('select_bar_pos', initial = 1, choices = (bar_pos_options), dtype = int)
-        S.New('enter_distance_mm', initial = 0.0, dtype = float)
+        #S.New('enter_distance_mm', initial = 0.0, dtype = float)
         S.New('select_thinfilm', initial = '', choices = ([]), dtype = str)
 
         # Populated Bar Layout
-        wafer_width = 15 
+        S.New('offset_from_left_mm', initial = 25)
+        S.New('incidence_angle_all', initial = 0, dtype = float)
+        S.New('wafer_width', initial = 15, dtype = float)
+
         for i in range(1,15):
-            S.New(f'pos{i}_distance_mm', initial = (i*wafer_width)+25, dtype = float)
+            S.New(f'pos{i}_distance_mm', initial = ((i-1)*S['wafer_width'])+S['offset_from_left_mm'], dtype = float)
             S.New(f'pos{i}_thin_film', initial = '', dtype = str)
-            S.New(f'pos{i}_thin_film_mfid', initial = '', dtype = str)
-            S.New(f'pos{i}_thin_film_descrip', initial = '', dtype = str)
+            S.New(f'pos{i}_incidence_angle', initial = S['incidence_angle_all'], dtype = float)
 
         # actions
+        S.email.add_listener(self.on_enter_email, argtype = str)
         S.tray_uuid.add_listener(self.on_enter_tray_uuid, argtype = str)
-        
+        S.incidence_angle_all.add_listener(self.apply_incidence_angle, argtype = float)
+        S.offset_from_left_mm.add_listener(self.recalc_positions, argtype = float)
+        S.wafer_width.add_listener(self.recalc_positions, argtype = float)
+
         # Initialize all_sample_info
         self.all_sample_info = []
-        
         self.setup_ui()
     
 
@@ -91,6 +116,13 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         ui = self.ui = load_qt_ui_file(self.ui_filename)
 
         # connect to layout defined in ui file
+        S.email.connect_to_widget(ui.email_lineEdit)
+        S.user_name.connect_to_widget(ui.username_lineEdit)
+        S.project.connect_to_widget(ui.project_comboBox)
+        S.session_name.connect_to_widget(ui.session_lineEdit)
+        S.comments.connect_to_widget(ui.comments_lineEdit)
+        S.tags.connect_to_widget(ui.tags_lineEdit)
+
         S.bar_name.connect_to_widget(ui.lineEdit_barName)
         S.bar_mf_uuid.connect_to_widget(ui.lineEdit_mf_bar_uuid)
         S.bar_als_uuid.connect_to_widget(ui.lineEdit_als_bar_uuid)
@@ -99,71 +131,139 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         S.tray_uuid.connect_to_widget(ui.lineEdit_tray_uuid)
 
         S.select_bar_pos.connect_to_widget(ui.comboBox_select_barpos)
-        S.enter_distance_mm.connect_to_widget(ui.doubleSpinBox_enter_mm)
         S.select_thinfilm.connect_to_widget(ui.comboBox_select_thinfilm)
         
+        S.wafer_width.connect_to_widget(ui.doubleSpinBox_wafer_width)
+        S.offset_from_left_mm.connect_to_widget(ui.doubleSpinBox_offset)
+        S.incidence_angle_all.connect_to_widget(ui.doubleSpinBox_angle)
         for i in range(1,15):
             S.get_lq(f'pos{i}_distance_mm').connect_to_widget(getattr(self.ui, f'doubleSpinBox_mm_{i}'))
             S.get_lq(f'pos{i}_thin_film').connect_to_widget(getattr(self.ui, f'lineEdit_tf_{i}'))
+           # S.get_lq(f'pos{i}_incidence_angle').connect_to_widget(getattr(self.ui, f'lineEdit_tf_{i}_angle'))
 
-        ui.pushButton_create_bar.clicked.connect(self.generate_bar_info)
+        ui.logout_button.clicked.connect(self.clear_userinfo)
+        ui.pushButton_create_bar_crucible.clicked.connect(self.upload_bar_info_crucible)
+        ui.pushButton_create_bar_als.clicked.connect(self.upload_bar_info_als)
         ui.pushButton_add_to_bar.clicked.connect(self.add_sample_to_bar_layout)
+        ui.pushButton_add_all.clicked.connect(self.add_all)
         ui.pushButton_print_barcode.clicked.connect(self.print_barcode)
         ui.pushButton_upload_bar.clicked.connect(self.add_bar_samples_to_database)
-    
+        ui.pushButton_new_bar_name.clicked.connect(self.read_bar_number_from_crucible)
+        ui.pushButton_clear_bar.clicked.connect(self.clear_bar_layout)
     
     def update_lq(self, newval, lq_name):
         lq = self.settings.get_lq(lq_name)
         lq.update_value(newval)
-
+        
     def update_lq_list(self, new_choices, new_value, lq_name):
         prop_lq = self.settings.get_lq(lq_name)
         prop_lq.change_choice_list(new_choices)
         prop_lq.update_value(new_value)
 
+    def on_enter_email(self):
+        provided_email = self.settings.email.value.strip()
+        user_info = cruc_client.get_user(email = provided_email)
+
+        if user_info is None:
+            return
+        # update user info
+        user_name = f'{user_info['first_name']}_{user_info['last_name']}'
+        self.update_lq(user_name, 'user_name')
+        self.update_lq(user_info['orcid'], 'orcid')
+
+        # update project list
+        projects = cruc_client.list_projects(user_info['orcid'])
+        project_ids = [x['project_id'] for x in projects]
+        project_ids.sort()
+        self.update_lq_list(project_ids, project_ids[0], 'project')
+
+
+    def clear_userinfo(self):
+        print(self.settings.project)
+        self.settings['user_name'] = self.default_user_name
+        self.settings['orcid'] = self.default_orcid
+        self.settings['email'] = self.default_email
+        self.settings['session_name'] = self.default_session_name
+        self.settings['tags'] = self.default_tags
+        self.settings['comments'] = self.default_comments
+
+        prop_lq = self.get_lq('project')
+        prop_lq.change_choice_list([])
+        prop_lq.update_value("")
+
+
+    def recalc_positions(self):
+        for i in range(1,15):
+            new_mm = ((i-1)*self.settings['wafer_width'])+self.settings['offset_from_left_mm']
+            self.update_lq(new_mm, f'pos{i}_distance_mm')
+
+    def apply_incidence_angle(self):
+        for i in range(1,15):
+            self.update_lq(self.settings['incidence_angle_all'], f'pos{i}_incidence_angle')
+
     def clear_bar_layout(self):
         """Clear all bar layout positions"""
         for i in range(1, 15):
             self.update_lq('', f'pos{i}_thin_film')
-            self.update_lq('', f'pos{i}_thin_film_mfid')
-            self.update_lq('', f'pos{i}_thin_film_descrip')
         self.all_sample_info = []
 
-    def generate_bar_info(self):
+
+    def upload_bar_info_crucible(self):
         try:
-            bar_name = self.read_bar_number_from_crucible()
+            bar_name = self.settings['bar_name']
 
             # CREATE IN CRUCIBLE
             new_crux_bar = cruc_client.add_sample(sample_name = bar_name,
                                         creation_date = get_tz_isoformat(),
-                                        owner_orcid = self.mf_crucible.settings['orcid'],
-                                        project_id = self.mf_crucible.settings['project'],
+                                        owner_orcid = self.settings['orcid'],
+                                        project_id = self.settings['project'],
                                         sample_type = 'giwaxs bar'
                                         )
             mfid = new_crux_bar['unique_id']
+            self.update_lq(mfid, 'bar_mf_uuid')
+            # Success dialog
+            QtWidgets.QMessageBox.information(
+                self.ui,
+                "Bar Created Successfully",
+                f"Bar '{self.settings['bar_name']}' created successfully!\n\n"
+                f"Crucible UUID: {self.settings['bar_mf_uuid']}\n\n"
+                "Please add to the ALS Scicat Database next"
+            )
+            return
+            
+        except Exception as e:
+            # Failure dialog
+            QtWidgets.QMessageBox.critical(
+                self.ui,
+                "Bar Creation Failed",
+                f"Failed to create bar.\n\nError: {str(e)}"
+            )
+            return
 
+
+    def upload_bar_info_als(self):
+        try: 
+            if self.settings['bar_mf_uuid'] == '':
+                raise Exception("Please add to crucible before adding to the ALS database")
+            
             # CREATE IN ALS SCICAT
-            new_als_set = als_sc_client.create_set(name = bar_name, 
+            new_als_set = als_sc_client.create_set(name = self.settings['bar_name'], 
                                                    groupId = '733',
                                                    proposalId = 'DD-00839',
-                                                   description = f'MF Thin Film Perovskites GWBAR (mfid: {mfid})')
-
+                                                   description = f'MF Thin Film Perovskites GWBAR (mfid: {self.settings['bar_mf_uuid']})')
+            print(new_als_set)
+            print(new_als_set.id)
             # ADD ALS INFO TO CRUCIBLE
-            cruc_client.update_sample(sample_description =f'ALS GIWAXS Bar || Set ID: {new_als_set['id']}' )
-
-            self.update_lq(new_crux_bar['unique_id'], 'bar_mf_uuid')
-            self.update_lq(new_als_set['id'], 'bar_als_uuid')
-            
-            # Clear bar layout when creating new bar
-            self.clear_bar_layout()
+            cruc_client.update_sample(unique_id= self.settings['bar_mf_uuid'], description =f'ALS GIWAXS Bar || Set ID: {new_als_set.id}' )
+            self.update_lq(new_als_set.id, 'bar_als_uuid')
             
             # Success dialog
             QtWidgets.QMessageBox.information(
                 self.ui,
                 "Bar Created Successfully",
-                f"Bar '{bar_name}' created successfully!\n\n"
-                f"Crucible UUID: {mfid}\n"
-                f"ALS Set ID: {new_als_set['id']}"
+                f"Bar '{self.settings['bar_name']}' created successfully!\n\n"
+                f"Crucible UUID: {self.settings['bar_mf_uuid']}\n"
+                f"ALS Set ID: {self.settings['bar_als_uuid']}"
             )
             return
             
@@ -178,7 +278,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
 
 
     def read_bar_number_from_crucible(self):
-        bar_number = get_next_serial_sample('GWBAR', self.mf_crucible.settings['project'])
+        bar_number = get_next_serial_sample('GWBAR', self.settings['project'])
         bar_name = f'GWBAR{bar_number:06d}'
         self.update_lq(bar_name, 'bar_name')
         return bar_name
@@ -200,26 +300,26 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         sorted_samples = sorted(samples_on_tray, key=lambda item: item['sample_name'])
         sorted_sample_names = [x['sample_name'] for x in sorted_samples]
         self.update_lq_list(sorted_sample_names, sorted_sample_names[0],'select_thinfilm')
-        
+
+
+    def add_all(self):
+        lq = self.settings.get_lq('select_thinfilm')
+        tflist = [t[0] for t in lq.choices]
+        print(tflist)
+        tfind = 0
+        for i in range(1,15):
+            if tfind >= len(tflist):
+                break
+            if self.settings[f'pos{i}_thin_film'] == '':
+                tf_name = tflist[tfind]
+                self.update_lq(tf_name, f'pos{i}_thin_film')
+                tfind+=1
 
 
     def add_sample_to_bar_layout(self):
         i = self.settings['select_bar_pos']
         tf_name = self.settings['select_thinfilm']
-        tf_found = cruc_client.list_samples(sample_name = tf_name, project_id = self.mf_crucible.settings['project'])
-        if len(tf_found) == 1:
-            tf_found = tf_found[0]
-
-        else:
-            print(f'{tf_found}')
-            return
-        
-        tf_mfid = tf_found['unique_id']
-        tf_descrip = tf_found['description']
         self.update_lq(tf_name, f'pos{i}_thin_film')
-        self.update_lq(tf_mfid, f'pos{i}_thin_film_mfid')
-        self.update_lq(tf_descrip, f'pos{i}_thin_film_descrip')
-        self.update_lq(self.settings['enter_distance_mm'], f'pos{i}_distance_mm')
         return
 
 
@@ -233,9 +333,18 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         # Skip empty positions
         if not tf_name:
             return None
-            
-        tf_mfid = self.settings[f'pos{i}_thin_film_mfid']
-        tf_descrip = self.settings[f'pos{i}_thin_film_descrip']
+        
+        tf_found = cruc_client.list_samples(sample_name = tf_name, project_id = self.settings['project'])
+        if len(tf_found) == 1:
+            tf_found = tf_found[0]
+
+        else:
+            print(f'{tf_found}')
+            return
+        
+        tf_mfid = tf_found['unique_id']
+        tf_descrip = tf_found['description']
+
 
         # get metadata
         sample_ds = cruc_client.list_datasets(sample_id = tf_mfid, measurement = 'spin_run', include_metadata = True)
@@ -249,7 +358,7 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         # NOTE: Is it appropriate to have our metadata in parameters? - do we need to recalculate center?
         sample_syn_md['mfid'] = tf_mfid
         sample_syn_md["sample_center_position"]= self.settings[f'pos{i}_distance_mm']
-        sample_syn_md["incident_angles"] =  "0.14" # ??
+        sample_syn_md["incident_angles"] = self.settings[f'pos{i}_incidence_angle']
 
         sample_info_preview = {'bar_position': i,
                                'tf_name': tf_name,
@@ -296,19 +405,42 @@ class GiwaxsBarCreatorControlPanel(Measurement):
         for sample in self.all_sample_info:
             preview_text += f"\nPosition {sample['bar_position']}: {sample['tf_name']}\n"
             preview_text += f"  MFID: {sample['tf_mfid']}\n"
-            preview_text += f"  Center Position: {sample['sample_parameters']['sample_center_position']} mm\n"
+            preview_text += f"Metadata: {sample['sample_parameters']}\n"
         
-        # Create dialog
-        dialog = QtWidgets.QMessageBox(self.ui)
-        dialog.setWindowTitle("Sample Preview")
-        dialog.setText("Review samples before uploading to database:")
-        dialog.setDetailedText(preview_text)
-        dialog.setStandardButtons(QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel)
-        dialog.setDefaultButton(QtWidgets.QMessageBox.Ok)
-        
-        # Show dialog and return result
-        result = dialog.exec_()
-        return result == QtWidgets.QMessageBox.Ok
+        # Create dialog                                                                                                                                                                                                                                                       
+        dialog = QtWidgets.QDialog(self.ui)                                                                                                                                                                                                                                   
+        dialog.setWindowTitle("Sample Preview")                                                                                                                                                                                                                               
+        dialog.resize(700, 500)                                                                                                                                                                                                                                               
+        dialog.setMinimumSize(500, 400)                                                                                                                                                                                                                                       
+                                                                                                                                                                                                                                                                                
+        # Enable resizing                                                                                                                                                                                                                                                     
+        dialog.setSizeGripEnabled(True)                                                                                                                                                                                                                                       
+                                                                                                                                                                                                                                                                                
+        layout = QtWidgets.QVBoxLayout()                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                
+        # Add label                                                                                                                                                                                                                                                           
+        label = QtWidgets.QLabel("Review samples before uploading to database:")                                                                                                                                                                                              
+        layout.addWidget(label)                                                                                                                                                                                                                                               
+                                                                                                                                                                                                                                                                                
+        # Add text edit with preview                                                                                                                                                                                                                                          
+        text_edit = QtWidgets.QTextEdit()                                                                                                                                                                                                                                     
+        text_edit.setPlainText(preview_text)                                                                                                                                                                                                                                  
+        text_edit.setReadOnly(True)                                                                                                                                                                                                                                           
+        layout.addWidget(text_edit)                                                                                                                                                                                                                                           
+                                                                                                                                                                                                                                                                                
+        # Add buttons                                                                                                                                                                                                                                                         
+        button_box = QtWidgets.QDialogButtonBox(                                                                                                                                                                                                                              
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel                                                                                                                                                                                                 
+        )                                                                                                                                                                                                                                                                     
+        button_box.accepted.connect(dialog.accept)                                                                                                                                                                                                                            
+        button_box.rejected.connect(dialog.reject)                                                                                                                                                                                                                            
+        layout.addWidget(button_box)                                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                                                                
+        dialog.setLayout(layout)                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                                
+        # Show dialog and return result                                                                                                                                                                                                                                       
+        result = dialog.exec_()                                                                                                                                                                                                                                               
+        return result == QtWidgets.QDialog.Accepted 
 
     
     def add_bar_samples_to_database(self):
@@ -326,8 +458,8 @@ class GiwaxsBarCreatorControlPanel(Measurement):
                 tf_mfid = tf['tf_mfid']
 
                 # link to bar in crucible
-                cruc_client.link_samples(parent_sample_id = self.settings['bar_mf_uuid'],
-                                         child_sample_id = tf_mfid)
+                cruc_client.link_samples(parent_id = self.settings['bar_mf_uuid'],
+                                         child_id = tf_mfid)
 
                 new_als_samp = als_sc_client.create_sample(name = tf_name,
                                             group_id = '733',
@@ -338,8 +470,8 @@ class GiwaxsBarCreatorControlPanel(Measurement):
                                             parameters = tf['sample_parameters'])
                 
                 # update sample in crucible
-                updated_description = f"{tf.get('tf_descrip', '')} {new_als_samp['id']}".strip()
-                cruc_client.update_sample(tf_mfid, sample_description = updated_description)
+                updated_description = f"{tf.get('tf_descrip', '')} {new_als_samp.id}".strip()
+                cruc_client.update_sample(tf_mfid, description = updated_description)
             
             # Success dialog
             QtWidgets.QMessageBox.information(
