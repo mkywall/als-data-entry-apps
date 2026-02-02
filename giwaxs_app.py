@@ -1,8 +1,8 @@
 from ScopeFoundry import BaseMicroscopeApp
 
-# giwaxs bar
-#from ScopeFoundryHW.giwaxs_bar_creator.giwaxs_bar_hardware import GiwaxsBarHW
+# Individual control panels
 from ScopeFoundryHW.giwaxs_bar_creator.giwaxs_bar_controlpanel import GiwaxsBarCreatorControlPanel
+from ScopeFoundryHW.giwaxs_bar_creator.rga_carrier_controlpanel import RgaCarrierControlPanel
 
 # cruxxxxx
 #from ScopeFoundryHW.mf_crucible.mf_crucible_hardware import MFCrucibleHW
@@ -10,7 +10,7 @@ from ScopeFoundryHW.giwaxs_bar_creator.giwaxs_bar_controlpanel import GiwaxsBarC
 
 class GiwaxsApp(BaseMicroscopeApp):
     """
-    App to create bars of samples for Giwaxs at the ALS
+    App to create bars of samples for GIWAXS and RGA carriers at the ALS
     """
 
     name = 'giwaxs_app'
@@ -24,6 +24,7 @@ class GiwaxsApp(BaseMicroscopeApp):
 
         # ========== Measurements ==========
         self.add_measurement(GiwaxsBarCreatorControlPanel(self))
+        self.add_measurement(RgaCarrierControlPanel(self))
         #self.add_measurement(MFCrucibleControlPanel(self))
 
 if __name__ == '__main__':
